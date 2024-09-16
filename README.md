@@ -1,5 +1,5 @@
 - Steps
-- 
+  
 1.Start front - docker run -p 8080:80 front
   
 2.Start db - docker-compose up -d
