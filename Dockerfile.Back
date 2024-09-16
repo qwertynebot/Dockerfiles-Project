@@ -1,0 +1,55 @@
+# Використовуємо офіційний ASP.NET runtime як базовий образ для запуску додатка (.NET 8)
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+WORKDIR /app
+EXPOSE 5034
+
+# Використовуємо образ .NET SDK для зборки додатка (.NET 8 SDK)
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Встановлюємо інструменти Entity Framework Core
+RUN dotnet tool install --global dotnet-ef
+
+# Додаємо глобальні інструменти в PATH
+ENV PATH="$PATH:/root/.dotnet/tools"
+
+# Копіюємо файли .csproj і відновлюємо залежності
+COPY ["Facebook_Api/Facebook_Api.csproj", "Facebook_Api/"]
+COPY ["Facebook_Application/Facebook_Application.csproj", "Facebook_Application/"]
+COPY ["Facebook_Domain/Facebook_Domain.csproj", "Facebook_Domain/"]
+COPY ["Facebook_Contracts/Facebook_Contracts.csproj", "Facebook_Contracts/"]
+COPY ["Facebook_Infrastructure/Facebook_Infrastructure.csproj", "Facebook_Infrastructure/"]
+
+# Відновлюємо залежності
+RUN dotnet restore "Facebook_Api/Facebook_Api.csproj"
+
+# Копіюємо решту файлів додатка
+COPY . .
+
+# Додаємо міграції та оновлюємо базу даних під час збірки
+WORKDIR /src/Facebook_Infrastructure
+RUN dotnet ef migrations add InitialCreate --startup-project ../Facebook_Api
+RUN dotnet ef database update --startup-project ../Facebook_Api
+
+# Збираємо додаток
+WORKDIR "/src/Facebook_Api"
+RUN dotnet build "Facebook_Api.csproj" -c Release -o /app/build
+
+# Публікуємо додаток для продуктивного середовища
+FROM build AS publish
+RUN dotnet publish "Facebook_Api.csproj" -c Release -o /app/publish
+
+# Створюємо фінальний образ для запуску додатка
+FROM base AS final
+WORKDIR /app
+
+# Копіюємо файли додатка
+COPY --from=publish /app/publish .
+
+# Копіюємо директорію images з файлів, які повинні бути в контейнері
+COPY Facebook_Api/images /app/images
+
+# Переглядаємо вміст директорії для перевірки
+RUN ls -R /app/images
+
+ENTRYPOINT ["dotnet", "Facebook_Api.dll"]
