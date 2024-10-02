@@ -1,55 +1,44 @@
-# Використовуємо офіційний ASP.NET runtime як базовий образ для запуску додатка (.NET 8)
+# Use the official .NET SDK image as the base image (version 8.0 or higher)
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
-EXPOSE 5034
 
-# Використовуємо образ .NET SDK для зборки додатка (.NET 8 SDK)
+# Expose port 5181 (since the application is configured to run on this port)
+EXPOSE 5181
+
+# Use the official .NET SDK image to build the application
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# Встановлюємо інструменти Entity Framework Core
-RUN dotnet tool install --global dotnet-ef
+# Copy the solution file and restore any dependencies
+COPY ["Facebook_Server.sln", "./"]
 
-# Додаємо глобальні інструменти в PATH
-ENV PATH="$PATH:/root/.dotnet/tools"
-
-# Копіюємо файли .csproj і відновлюємо залежності
+# Copy all the projects referenced in the solution
 COPY ["Facebook_Api/Facebook_Api.csproj", "Facebook_Api/"]
 COPY ["Facebook_Application/Facebook_Application.csproj", "Facebook_Application/"]
-COPY ["Facebook_Domain/Facebook_Domain.csproj", "Facebook_Domain/"]
 COPY ["Facebook_Contracts/Facebook_Contracts.csproj", "Facebook_Contracts/"]
+COPY ["Facebook_Domain/Facebook_Domain.csproj", "Facebook_Domain/"]
 COPY ["Facebook_Infrastructure/Facebook_Infrastructure.csproj", "Facebook_Infrastructure/"]
 
-# Відновлюємо залежності
-RUN dotnet restore "Facebook_Api/Facebook_Api.csproj"
+# Restore dependencies for all projects
+RUN dotnet restore "./Facebook_Server.sln"
 
-# Копіюємо решту файлів додатка
+# Copy the entire source code
 COPY . .
 
-# Додаємо міграції та оновлюємо базу даних під час збірки
-WORKDIR /src/Facebook_Infrastructure
-RUN dotnet ef migrations add InitialCreate --startup-project ../Facebook_Api
-RUN dotnet ef database update --startup-project ../Facebook_Api
+# Build the application
+RUN dotnet build "Facebook_Api/Facebook_Api.csproj" -c Release -o /app/build
 
-# Збираємо додаток
-WORKDIR "/src/Facebook_Api"
-RUN dotnet build "Facebook_Api.csproj" -c Release -o /app/build
-
-# Публікуємо додаток для продуктивного середовища
+# Publish the application
 FROM build AS publish
-RUN dotnet publish "Facebook_Api.csproj" -c Release -o /app/publish
+RUN dotnet publish "Facebook_Api/Facebook_Api.csproj" -c Release -o /app/publish
 
-# Створюємо фінальний образ для запуску додатка
+# Use the base image to run the application
 FROM base AS final
 WORKDIR /app
-
-# Копіюємо файли додатка
 COPY --from=publish /app/publish .
 
-# Копіюємо директорію images з файлів, які повинні бути в контейнері
+#Copy images
 COPY Facebook_Api/images /app/images
-
-# Переглядаємо вміст директорії для перевірки
-RUN ls -R /app/images
-
+COPY Facebook_Api/EmailTemplates /app/EmailTemplates
+# Run the application
 ENTRYPOINT ["dotnet", "Facebook_Api.dll"]
