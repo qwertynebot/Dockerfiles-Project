@@ -1,44 +1,49 @@
-# Use the official .NET SDK image as the base image (version 8.0 or higher)
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+# 1. Вказуємо базовий образ для .NET SDK (необхідний для збірки проєкту)
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+
+# 2. Встановлюємо робочу директорію в контейнері
 WORKDIR /app
 
-# Expose port 5181 (since the application is configured to run on this port)
-EXPOSE 5181
+# 3. Копіюємо всі необхідні файли проекту
+COPY *.sln ./
+COPY Facebook_Api/Facebook_Api.csproj ./Facebook_Api/
+COPY Facebook_Application/Facebook_Application.csproj ./Facebook_Application/
+COPY Facebook_Contracts/Facebook_Contracts.csproj ./Facebook_Contracts/
+COPY Facebook_Domain/Facebook_Domain.csproj ./Facebook_Domain/
+COPY Facebook_Infrastructure/Facebook_Infrastructure.csproj ./Facebook_Infrastructure/
 
-# Use the official .NET SDK image to build the application
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
+# 4. Відновлюємо залежності
+RUN dotnet restore
 
-# Copy the solution file and restore any dependencies
-COPY ["Facebook_Server.sln", "./"]
-
-# Copy all the projects referenced in the solution
-COPY ["Facebook_Api/Facebook_Api.csproj", "Facebook_Api/"]
-COPY ["Facebook_Application/Facebook_Application.csproj", "Facebook_Application/"]
-COPY ["Facebook_Contracts/Facebook_Contracts.csproj", "Facebook_Contracts/"]
-COPY ["Facebook_Domain/Facebook_Domain.csproj", "Facebook_Domain/"]
-COPY ["Facebook_Infrastructure/Facebook_Infrastructure.csproj", "Facebook_Infrastructure/"]
-
-# Restore dependencies for all projects
-RUN dotnet restore "./Facebook_Server.sln"
-
-# Copy the entire source code
+# 5. Копіюємо решту файлів проекту
 COPY . .
 
-# Build the application
-RUN dotnet build "Facebook_Api/Facebook_Api.csproj" -c Release -o /app/build
+# 6. Створюємо production-збірку
+WORKDIR /app/Facebook_Api
+RUN dotnet publish -c Release -o /app/publish
 
-# Publish the application
-FROM build AS publish
-RUN dotnet publish "Facebook_Api/Facebook_Api.csproj" -c Release -o /app/publish
+# 7. Використовуємо легкий образ для запуску додатку
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 
-# Use the base image to run the application
-FROM base AS final
+# 8. Встановлюємо робочу директорію для runtime
 WORKDIR /app
-COPY --from=publish /app/publish .
 
-#Copy images
+# 9. Копіюємо згенеровану збірку з попереднього кроку
+COPY --from=build /app/publish .
+
+# Додаємо копіювання статичних файлів, таких як зображення та email-шаблони
 COPY Facebook_Api/images /app/images
 COPY Facebook_Api/EmailTemplates /app/EmailTemplates
-# Run the application
+
+# 10. Відкриваємо порт для HTTP-запитів
+EXPOSE 5181
+
+# 11. Змінна оточення для Production
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+# 12. Виконуємо міграції бази даних перед запуском
+# CMD виконується після ENTRYPOINT і запускає міграцію та запуск програми
 ENTRYPOINT ["dotnet", "Facebook_Api.dll"]
+
+# Міграція бази даних перед запуском програми
+CMD ["dotnet", "ef", "database", "update", "--no-build", "--project", "Facebook_Api/Facebook_Api.csproj"]
